@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Mail;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Database\QueryException;
 
 class LoginController extends Controller
 {
@@ -48,24 +49,35 @@ class LoginController extends Controller
 
     public function loginCheck(Request $request)
 {
-    $request->validate([
-        'email' => 'required|email',
-        'password' => 'required|string'
-    ]);
+    try {
+        $request->validate([
+            'email' => 'required|email',
+            'password' => 'required|string'
+        ]);
 
-    $user = User::where('email', $request->email)->first();
+        $credentials = $request->only('email', 'password');
 
-    if (!$user) {
-        return response()->json(['message' => 'Email not found'], 404);
+        if (!Auth::attempt($credentials)) {
+            return response()->json(['message' => 'Invalid login'], 401);
+        }
+
+        $token = $request->user()->createToken('login_token')->plainTextToken;
+
+        return response()->json([
+            'message' => 'Login successful',
+            'token' => $token,
+            'user' => $request->user()
+        ]);
+
+    } catch (\Illuminate\Database\QueryException $e) {
+        if ($e->getCode() === '2002') {
+            return response()->json(['message' => 'Server down, please try later'], 500);
+        }
+        return response()->json(['message' => 'Server down, please try later'], 500);
+    } catch (\Exception $e) {
+        return response()->json(['message' => 'Something went wrong'], 500);
     }
-
-    if (!\Hash::check($request->password, $user->password)) {
-        return response()->json(['message' => 'Incorrect password'], 401);
-    }
-
-    return response()->json(['message' => 'OK'], 200);
 }
-
 
     // -----------------------------
     // VERIFY OTP AND LOG USER IN
@@ -104,25 +116,37 @@ class LoginController extends Controller
     // -----------------------------
     // NORMAL EMAIL + PASSWORD LOGIN
     // -----------------------------
-    public function login(Request $request)
+   public function login(Request $request)
     {
         $request->validate([
             'email' => 'required|email',
             'password' => 'required|string'
         ]);
 
-        $credentials = $request->only('email', 'password');
+        try {
+    $credentials = $request->only('email', 'password');
 
-        if (!Auth::attempt($credentials)) {
-            return response()->json(['message' => 'Invalid login'], 401);
-        }
+    if (!Auth::attempt($credentials)) {
+        return response()->json(['message' => 'Invalid login'], 401);
+    }
 
-        $token = $request->user()->createToken('login_token')->plainTextToken;
+    $token = $request->user()->createToken('login_token')->plainTextToken;
 
-        return response()->json([
-            'message' => 'Login Successful',
-            'token' => $token,
-            'user' => $request->user()
-        ]);
+    return response()->json([
+        'message' => 'Login Successful',
+        'token' => $token,
+        'user' => $request->user()
+    ]);
+
+} catch (QueryException $e) {
+    // MySQL server connection refused
+    if ($e->getCode() === '2002') {
+        return response()->json(['message' => 'Server down, please try later'], 500);
+    }
+
+    return response()->json(['message' => 'Database error'], 500);
+} catch (\Exception $e) {
+    return response()->json(['message' => 'Something went wrong'], 500);
+}
     }
 }

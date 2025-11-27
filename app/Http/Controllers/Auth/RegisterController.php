@@ -11,6 +11,8 @@ use App\Models\User;
 use App\Models\OtpVerification;
 use Carbon\Carbon;
 use App\Mail\OtpMail;
+use Illuminate\Database\QueryException;
+
 
 class RegisterController extends Controller
 {
@@ -103,41 +105,78 @@ class RegisterController extends Controller
             'password' => 'required|string|min:8|confirmed'
         ]);
 
-        if($validator->fails()){
-            return response()->json(["errors"=> $validator->errors()], 422);
+        if ($validator->fails()) {
+            return response()->json(["errors" => $validator->errors()], 422);
         }
 
-        // Check OTP
-        $otpRecord = OtpVerification::where('email', $request->email)
-            ->orderBy('created_at','desc')->first();
+        try {
+            // Check OTP verification
+            $otpRecord = OtpVerification::where('email', $request->email)
+                ->orderBy('created_at', 'desc')
+                ->first();
 
-        if(!$otpRecord || !$otpRecord->verified){
-            return response()->json(['message'=>'Email not verified'], 400);
+            if (!$otpRecord || !$otpRecord->verified) {
+                return response()->json(['message' => 'Email not verified'], 400);
+            }
+
+            $user = User::create([
+                'first_name' => $request->first_name,
+                'last_name' => $request->last_name,
+                'dob' => $request->dob,
+                'phone' => $request->phone,
+                'phone_country_code' => $request->phone_country_code,
+                'location' => $request->location,
+                'location_country_code' => $request->location_country_code,
+                'email' => $request->email,
+                'gender' => $request->gender,
+                'role' => $request->role,
+                'password' => Hash::make($request->password),
+                'email_verified_at' => now()
+            ]);
+
+            $otpRecord->delete();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Registration complete',
+                'user' => $user
+            ], 201);
+
+        } catch (QueryException $e) {
+            if ($e->getCode() === '2002') {
+                return response()->json(['message' => 'Server down, please try later'], 500);
+            }
+            return response()->json(['message' => 'Database error'], 500);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Something went wrong'], 500);
         }
+    }
 
-        // Create user
-        $user = User::create([
-            'first_name' => $request->first_name,
-            'last_name' => $request->last_name,
-            'dob' => $request->dob,
-            'phone' => $request->phone,
-            'phone_country_code' => $request->phone_country_code,
-            'location' => $request->location,
-            'location_country_code' => $request->location_country_code,
-            'email' => $request->email,
-            'gender' => $request->gender,
-            'role' => $request->role,
-            'password' => Hash::make($request->password),
-            'email_verified_at' => now()
+    public function checkBeforeNext(Request $request)
+{
+    try {
+        $request->validate([
+            'firstName' => 'required|string|max:255',
+            'lastName' => 'required|string|max:255',
+            'dob' => 'required|date',
+            'gender' => 'required|in:male,female,other',
         ]);
 
-        // Remove OTP
-        $otpRecord->delete();
+        // Example DB check to trigger QueryException if server is down
+        // You can remove if not needed
+        $count = \App\Models\User::count();
 
-        return response()->json([
-            'status' => true,
-            'message'=>'Registration complete', 
-            'user' => $user], 
-            201);
+        return response()->json(['message' => 'All good'], 200);
+
+    } catch (\Illuminate\Database\QueryException $e) {
+        // Database connection issues
+        if ($e->getCode() === '2002') {
+            return response()->json(['message' => 'Server down, please try later'], 500);
+        }
+        return response()->json(['message' => 'Server down, please try later'], 500);
+    } catch (\Exception $e) {
+        return response()->json(['message' => 'Something went wrong'], 500);
     }
+}
+
 }
